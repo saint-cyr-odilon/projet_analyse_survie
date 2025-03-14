@@ -1,0 +1,1412 @@
+---
+title: "Analyse de la Récidive en Iowa : Modélisation et Prédiction des Durées avant Réincarcération"
+author: "NOUCHET_Kwami & DAKPAKETE_Odilon"
+date: "2025-02-10"
+output: 
+  html_document:
+    toc: true               # Activation de la table des matières
+    toc_float: true         # Table des matières flottante
+    number_sections: true   # Numérotation des sections
+    theme: readable         # Thème Readable pour un style propre
+    highlight: textmate     # Style de surbrillance pour le code
+---
+
+<style>
+/* Style pour le titre de la table des matières */
+#TOC::before {
+  content: "Table des matières";
+  display: block;
+  font-size: 20px;
+  font-weight: bold;
+  color: #ffffff; /* Texte blanc */
+  background-color: #2b3e50; /* Fond bleu sombre */
+  padding: 10px;
+  text-align: center;
+  border-radius: 5px;
+  margin-bottom: 10px;
+}
+
+/* Styles pour les titres */
+h1 {
+  font-family: 'Arial', sans-serif;
+  font-size: 2.5em;
+  color: #2c3e50; /* Bleu foncé */
+  text-transform: uppercase;
+  border-bottom: 3px solid #2980b9; /* Ligne de séparation */
+  padding-bottom: 0.2em;
+}
+
+h2 {
+  font-family: 'Georgia', serif;
+  font-size: 2em;
+  color: #34495e;
+  margin-top: 1.5em;
+  text-transform: capitalize;
+}
+
+h3 {
+  font-family: 'Verdana', sans-serif;
+  font-size: 1.5em;
+  color: #7f8c8d;
+  font-style: italic;
+}
+
+h4 {
+  font-family: 'Verdana', sans-serif;
+  font-size: 1em;
+  color: #95a5a6;
+  font-weight: bold;
+  text-transform: capitalize;
+  margin-top: 1.2em;
+}
+
+</style>
+
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+# Installer pacman si non installé
+if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
+pacman::p_load(tibble, DT, tidyverse, tidymodels, skimr, censored, survival, plotly, survminer, parsnip, recipes, workflows, tune, rsample, yardstick, ranger, xgboost, kernlab, sassy, ggplot2, readr, ggsurvfit, htmltools, summarytools, pec, randomForestSRC, mapview,doParallel,ggRandomForests,foreach,caret,patchwork,calibrate) 
+# Vérification des packages chargés
+print("Tous les packages ont été installés et chargés avec succès ! ✅")  
+```
+
+<h1 style="text-align:left;">INTRODUCTION</h1>
+
+La récidive carcérale est une problématique majeure pour les systèmes pénitentiaires et judiciaires à travers le monde. Comprendre les dynamiques qui influencent le retour en détention permet d’éclairer les politiques de réinsertion et d’optimiser les ressources allouées à la prévention. Aux États-Unis, l’État de l’Iowa publie chaque année des données détaillées sur les taux de récidive des anciens détenus, offrant une opportunité d’analyse approfondie sur la durée avant réincarcération et les facteurs qui influencent ce phénomène.
+
+Dans ce projet, nous nous intéressons aux données issues du **Iowa Department of Corrections** sur la **récidive carcérale et le taux de réinsertion réussie**. Cette base de données suit les individus libérés de prison sur une période de trois ans et indique s’ils ont été réincarcérés pour une **nouvelle infraction** ou une **violation technique** de leur libération conditionnelle. L’analyse des durées de survie jusqu’à la réincarcération nous permettra d’examiner les trajectoires post-carcérales et d’évaluer l’efficacité des politiques de réinsertion en place.
+
+<h3 style="text-align:left;">PROBLEMATIQUE</h3>
+
+Quels sont les facteurs qui influencent la récidive des détenus en Iowa ? Peut-on prédire le moment où un individu a le plus de risque de récidiver après sa sortie de prison ? Et quels modèles statistiques et algorithmes d’apprentissage permettent d’optimiser ces prédictions ?
+
+Ce projet vise à :
+
+1. **Analyser les durées de survie avant la récidive** à l’aide d’estimateurs non paramétriques comme **Kaplan-Meier** et **Nelson-Aalen**.
+
+2. **Comparer les taux de récidive selon différents groupes d’individus** à l’aide du **test du log-rank**.
+
+3. **Modéliser le risque de réincarcération** à l’aide du **modèle de Cox** semi-paramétrique et/ou de modèles paramétriques adaptés.
+
+4. **Appliquer un algorithme d’apprentissage machine** (forêts aléatoires de survie, CoxBoosting ou SVM de survie) afin d’améliorer les prédictions et d’optimiser les décisions de réinsertion.
+
+<h3 style="text-align:left;">CADRE D'ANALYSE ET METHODOLOGIE</h3>
+
+Ce travail s’appuie sur des méthodes statistiques et de machine learning adaptées aux données de survie :
+
+1. **Exploration et préparation des données**  
+   - Chargement et nettoyage des données de l’Iowa Department of Corrections.  
+   - Analyse descriptive des cohortes et des taux de récidive.  
+   - Identification des variables pertinentes pour l’analyse.
+
+2. **Estimation non paramétrique des durées de survie**  
+   - **Estimateur de Kaplan-Meier** pour visualiser la fonction de survie.  
+   - **Estimateur de Nelson-Aalen** pour estimer le risque cumulé de réincarcération.
+
+3. **Test du log-rank**  
+   - Comparaison des courbes de survie entre différents groupes (ex : type de libération, infractions passées, etc.).  
+   - Détection des différences significatives dans les taux de récidive.
+
+4. **Modélisation du risque de réincarcération**  
+   - **Modèle de Cox semi-paramétrique** pour identifier les variables explicatives.  
+   - **Modèle paramétrique** (ex : Weibull, exponentiel) pour comparer les résultats.
+
+5. **Apprentissage machine pour la prédiction de la récidive**  
+   - Choix d’un algorithme parmi **forêts de survie, CoxBoost ou SVM de survie**.  
+   - **Optimisation des paramètres via validation croisée K-fold sur le C-index de Harrell**.  
+   - Comparaison des performances prédictives avec le modèle de Cox.
+
+6. **Synthèse et recommandations**  
+   - Identification des principaux facteurs de récidive.  
+   - Proposition de recommandations pour améliorer les politiques de réinsertion.  
+   - Discussion des limites des modèles utilisés et perspectives d’amélioration.
+
+Ce projet combinera des outils statistiques classiques et des méthodes modernes d’apprentissage afin d’explorer les trajectoires des anciens détenus en Iowa. En identifiant les facteurs clés de la récidive et en testant différents modèles prédictifs, nous espérons contribuer à une meilleure compréhension du phénomène et offrir des pistes d’amélioration pour la réinsertion des anciens détenus.
+
+Présentation des Variables
+Les données utilisées dans le cadre de cette étude proviennent principalement de : 
+[<i class="fa fa-external-link-alt"></i> Accéder aux données de l'Etat d'Iowa aux Etats Unis](https://data.iowa.gov/Correctional-System/Iowa-Prison-Recidivism-Status-Current-Cohort/msmx-x2q6/about_data)
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Création du dictionnaire des données
+data_description <- data.frame(
+  Variable = c(
+    "Race", "Sex", "Age", "Supervising Unit", "Supervision Type",
+    "Cohort Fiscal Year", "Report Fiscal Year", "Supervision Start Date",
+    "Supervision End Date", "Months Supervised", "Supervision End Reason",
+    "Charge ID [Internal]", "Supervision Offense Class", "Supervision Offense Type",
+    "Supervision Offense Subtype", "Reincarcerated", "Reincarcerated Reason",
+    "Survival Time (Days)", "Survival Time (Months)", "Reincarcerated Offense Code",
+    "Reincarcerated Offense Class", "Reincarcerated Offense Type", "Reincarcerated Offense Subtype",
+    "Risk Ranking"
+  ),
+  Type = c(
+    "Catégorielle", "Catégorielle", "Numérique", "Catégorielle", "Catégorielle",
+    "Numérique", "Numérique", "Date", "Date", "Numérique", "Catégorielle",
+    "Numérique", "Catégorielle", "Catégorielle", "Catégorielle", "Binaire",
+    "Catégorielle", "Numérique", "Numérique", "Textuelle",
+    "Catégorielle", "Catégorielle", "Catégorielle", "Catégorielle"
+  ),
+  Description = c(
+    "Race de l'individu (Blanc, Afro-Américain, Hispaniques, etc.).",
+    "Sexe de l'individu (Homme ou Femme).",
+    "Âge de l'individu au moment de la supervision.",
+    "Unité supervisant l'individu après sa sortie de prison.",
+    "Type de supervision (Prison ou Work Release).",
+    "Année fiscale de sortie de prison (du 1er juillet au 30 juin).",
+    "Année fiscale où la réinsertion est considérée comme réussie.",
+    "Date de début de la supervision après la sortie de prison.",
+    "Date de fin de la supervision (libération complète ou réincarcération).",
+    "Durée totale de supervision en mois.",
+    "Motif de fin de la supervision (ex: succès, réincarcération, violation).",
+    "Identifiant unique de la charge criminelle (interne).",
+    "Classe de l'infraction pour laquelle l'individu est supervisé (Felony, Misdemeanor, etc.).",
+    "Type d'infraction sous supervision (Violent, Drogues, etc.).",
+    "Sous-type d'infraction sous supervision (ex: Vol, Drogue, Violences).",
+    "Indique si l'individu a été réincarcéré (Oui/Non).",
+    "Motif de réincarcération (nouvelle infraction, violation technique).",
+    "Temps écoulé en jours avant la réincarcération (si applicable).",
+    "Temps écoulé en mois avant la réincarcération (si applicable).",
+    "Code de l'infraction ayant conduit à la réincarcération.",
+    "Classe de l'infraction ayant conduit à la réincarcération.",
+    "Type de l'infraction ayant conduit à la réincarcération.",
+    "Sous-type de l'infraction ayant conduit à la réincarcération.",
+    "Classement de risque de récidive attribué à l'individu (Low, Moderate, High)."
+  )
+)
+
+# Affichage du dictionnaire sous forme de tableau interactif
+#datatable(data_description, options = list(pageLength = 10, scrollX = TRUE), caption = "Dictionnaire des Données - Iowa Prison Recidivism")
+
+tagList(
+  tags$h3("Dictionnaire des Données - Iowa Prison Recidivism"),
+  datatable(
+    data_description, 
+    options = list(
+      pageLength = 10,  
+      scrollY = "300px" 
+    )
+  )
+)
+```
+
+
+# **Exploration et préparation des données**
+
+## Chargement des données 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+iowa_data <- read_csv("Data/Iowa_Prison_Recidivism_Status__Current_Cohort_20250211.csv")
+
+# Afficher les premières lignes du jeu de données
+tagList(
+  tags$h3("Aperçu de la base de données"),
+  datatable(
+    head(iowa_data), 
+    options = list(
+      pageLength = 5,  # Nombre de lignes par défaut
+      scrollY = "300px" # Ajuste la hauteur pour voir plus de lignes
+    )
+  )
+)
+
+```
+
+
+## Nettoyage et transformation des variables
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+# Renommer les colonnes pour simplifier
+iowa_data <- iowa_data %>%
+  rename(
+    race = `Race`,
+    sex = `Sex`,
+    age = `Age`,
+    supervising_unit = `Supervising Unit`,
+    supervision_type = `Supervision Type`,
+    cohort_year = `Cohort Fiscal Year`,
+    report_year = `Report Fiscal Year`,
+    supervision_start = `Supervision Start Date`,
+    supervision_end = `Supervision End Date`,
+    months_supervised = `Months Supervised`,
+    supervision_end_reason = `Supervision End Reason`,
+    charge_id = `Charge ID [Internal]`,
+    offense_class = `Supervision Offense Class`,
+    offense_type = `Supervision Offense Type`,
+    offense_subtype = `Supervision Offense Subtype`,
+    reincarcerated = `Reincarcerated`,
+    reincarcerated_reason = `Reincarcerated Reason`,
+    survival_days = `Survival Time (Days)`,
+    survival_months = `Survival Time (Months)`,
+    reincarcerated_offense_code = `Reincarcerated Offense Code`,
+    reincarcerated_offense_class = `Reincarcerated Offense Class`,
+    reincarcerated_offense_type = `Reincarcerated Offense Type`,
+    reincarcerated_offense_subtype = `Reincarcerated Offense Subtype`,
+    risk_ranking = `Risk Ranking`
+  )
+
+# Convertir la variable 'reincarcerated' en numérique (0 = non, 1 = oui)
+iowa_data <- iowa_data %>%
+  mutate(reincarcerated = as.numeric(reincarcerated == "TRUE"))
+
+# Convertir 'supervision_end' en format Date pour extraire l'année
+iowa_data <- iowa_data %>%
+  mutate(supervision_end = as.Date(supervision_end, format = "%m/%d/%Y"))
+# Convertir 'supervision_end' en format Date pour extraire l'année
+iowa_data <- iowa_data %>%
+  mutate(supervision_start = as.Date(supervision_start, format = "%m/%d/%Y"))
+
+# Calculer la date de retour en prison
+iowa_data <- iowa_data %>%
+  mutate(
+    reincarceration_date = case_when(
+      !is.na(survival_days) ~ supervision_end + survival_days,
+      TRUE ~ NA_Date_
+    ),
+    reincarceration_year = as.numeric(format(reincarceration_date, "%Y"))
+  )
+
+iowa_data <- iowa_data %>% dplyr::select(-reincarceration_date)
+
+# Conversion des variables catégoriques en facteurs
+iowa_data <- iowa_data %>%
+  mutate(
+    sex = as.factor(sex),
+    race = as.factor(race),
+    supervision_type = as.factor(supervision_type),
+    offense_class = as.factor(offense_class),
+    offense_type = as.factor(offense_type),
+    offense_subtype = as.factor(offense_subtype),
+    reincarcerated = as.factor(reincarcerated),  # 0 = non récidive, 1 = récidive
+    risk_ranking = as.factor(risk_ranking),
+    charge_id = as.factor(charge_id)
+  )
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+# Vérification des valeurs manquantes (Affichage propre)
+missing_values <- colSums(is.na(iowa_data))
+
+missing_df <- data.frame(Colonne = names(missing_values), 
+                         Valeurs_manquantes = missing_values)
+
+ggplot(missing_df, aes(x = reorder(Colonne, -Valeurs_manquantes), y = Valeurs_manquantes)) +
+  geom_bar(stat = "identity", fill = "red") +
+  geom_text(aes(label = Valeurs_manquantes), vjust = 0.4, hjust = 1.5, size = 3, color = "white") +  # Texte en bas des barres
+  coord_flip() +
+  labs(title = "Nombre de valeurs manquantes par colonne", 
+       x = "Colonnes", 
+       y = "Nombre de valeurs manquantes") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  # Centrer le titre
+
+```
+
+
+## Analyse descriptive 
+
+### Statistiques de base
+```{r, include = FALSE, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+# Générer un résumé amélioré des données sous forme de tableau
+"summary_table <- skim(iowa_data_copy) %>%
+  dplyr::select(skim_variable, numeric.mean, numeric.sd, numeric.p0, numeric.p25, 
+         numeric.p50, numeric.p75, numeric.p100, n_missing) %>%
+  rename(Variable = skim_variable, Moyenne = numeric.mean, Écart_Type = numeric.sd, 
+         Min = numeric.p0, Q1 = numeric.p25, Médiane = numeric.p50, 
+         Q3 = numeric.p75, Max = numeric.p100, Manquants = n_missing)
+
+# Affichage interactif du tableau
+datatable(summary_table, options = list(pageLength = 10, scrollX = TRUE))"
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+# Résumé des données avec stats pour numériques + catégoriques
+summary_table <- dfSummary(iowa_data)
+
+print(summary_table, method = "browser", file = "summary_table.html")
+```
+
+
+```{r, echo=FALSE, results='asis'}
+cat('<iframe src="summary_table.html" width="100%" height="600px"></iframe>')
+```
+
+
+### Visualisation des données
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+# Étape 1 : Calcul des statistiques de récidive par type et par année
+recidivism_stats <- iowa_data %>%
+  filter(!is.na(reincarceration_year), !is.na(reincarcerated_reason)) %>%
+  group_by(reincarceration_year, reincarcerated_reason) %>%
+  summarise(Recidivism_Count = n(), .groups = "drop") %>%
+  group_by(reincarceration_year) %>%
+  mutate(
+    Total_Recidivism = sum(Recidivism_Count)  # Total des récidives par année
+  ) %>%
+  ungroup()
+
+# Étape 2 : Nombre total de récidives observées (utilisé pour normaliser)
+total_recidivism_observed <- sum(recidivism_stats$Total_Recidivism, na.rm = TRUE)
+
+# Étape 3 : Calcul du taux global de récidive par année (basé sur total observé)
+recidivism_rate_df <- recidivism_stats %>%
+  dplyr::select(reincarceration_year, Total_Recidivism) %>%
+  distinct() %>%
+  mutate(Recidivism_Rate = (Total_Recidivism / total_recidivism_observed) * 100)
+
+# Étape 4 : Pivot pour voir les types de récidive en colonnes
+recidivism_pivot <- recidivism_stats %>%
+  dplyr::select(reincarceration_year, reincarcerated_reason, Recidivism_Count) %>%
+  pivot_wider(
+    names_from = reincarcerated_reason, 
+    values_from = Recidivism_Count, 
+    values_fill = 0
+  )
+
+# Étape 5 : Ajustement des pourcentages pour qu'ils correspondent à Recidivism_Rate
+recidivism_pivot <- recidivism_pivot %>%
+  left_join(recidivism_rate_df, by = "reincarceration_year") %>%
+  mutate(across(-c(reincarceration_year, Total_Recidivism, Recidivism_Rate), 
+                ~ (. / Total_Recidivism) * Recidivism_Rate))  # Ajustement des pourcentages
+
+# Étape 6 : Renommer les colonnes
+recidivism_pivot <- recidivism_pivot %>%
+  rename(New_Crime = `New Charge`, Technical_Violation = `Tech`)
+
+# Transformer les données pour ggplot (mettre les colonnes en long format)
+recidivism_long <- recidivism_pivot %>%
+  dplyr::select(reincarceration_year, Recidivism_Rate, New_Crime, Technical_Violation) %>%
+  pivot_longer(cols = c(Recidivism_Rate, New_Crime, Technical_Violation),
+               names_to = "Recidivism_Type",
+               values_to = "Rate")
+
+# Créer le graphique
+ggplot(recidivism_long, aes(x = reincarceration_year, y = Rate, color = Recidivism_Type)) +
+  geom_line(size = 1) +               # Tracer les lignes pour chaque type
+  geom_point(size = 3) +              # Ajouter des points pour chaque valeur
+  scale_color_manual(values = c("red", "blue", "green")) +  # Couleurs personnalisées
+  labs(title = "Evolution du taux de Récidive par Année",
+       x = "Année de Réincarcération",
+       y = "Taux de Récidive (%)",
+       color = "Type de Récidive") +
+  theme_minimal()                      # Thème épuré pour un beau rendu
+
+rm(recidivism_stats, recidivism_rate_df, recidivism_pivot, total_recidivism_observed)
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+Le graphique montre que le **taux de récidive global (Recidivism_Rate en bleu)** a fortement **augmenté en 2021**, suivi d'une **diminution progressive** jusqu'en 2024. Cette tendance est observée à la fois pour les **nouveaux crimes (New_Crime en rouge)** et les **violations techniques (Technical_Violation en vert)**, bien que les nouveaux crimes soient plus fréquents chaque année. Le pic de 2021 pourrait s'expliquer par la **reprise des contrôles judiciaires après la pandémie de COVID-19**, tandis que la baisse ensuite suggère une **stabilisation ou une amélioration des mesures de réinsertion**.  
+
+En comparant les types de récidive, les **nouveaux crimes restent plus fréquents** que les violations techniques sauf en 2021, où les deux sont presque équivalents. Cela pourrait indiquer une **pression accrue sur le système de probation** cette année-là. La tendance générale montre une **diminution continue de la récidive**, ce qui pourrait être le résultat de **politiques de suivi plus efficaces**.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+# Répartition des âges
+ggplot(iowa_data, aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "blue", alpha = 0.7) +
+  labs(title = "Distribution des âges",
+       x = "Âge",
+       y = "Nombre d'individus") +
+  theme_minimal()
+
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+- **Distribution des âges: **  Le graphique montre que la majorité des détenus sont **âgés de 25 à 40 ans**, avec un pic autour de **30 ans**. La distribution est asymétrique vers la droite, indiquant un **nombre décroissant de détenus avec l'âge**. Très peu de détenus ont plus de **60 ans**, ce qui suggère que les jeunes adultes sont les plus représentés dans cette population carcérale.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+# Visualisation du taux de récidive
+ggplot(iowa_data, aes(x = reincarcerated)) +
+  geom_bar(fill = c("blue", "lightcoral"), alpha = 0.7) +
+  labs(title = "Répartition des récidivistes et non-récidivistes",
+       x = "Récidive (0 = Non, 1 = Oui)",
+       y = "Nombre d'individus") +
+  theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+- **Répartition des récidivistes et non-récidivistes: **  Le nombre de **non-récidivistes (en bleu)** est **nettement supérieur** à celui des **récidivistes (en rouge)**. Cela montre que **moins de la moitié des libérés récidivent**, ce qui pourrait suggérer une **efficacité relative des mesures de réinsertion** ou une **surveillance stricte** des récidivistes potentiels.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+ggplot(iowa_data, aes(x = offense_class, fill = as.factor(reincarcerated))) +
+  geom_bar(position = "fill") +
+  geom_text(aes(label = scales::percent(..count.. / tapply(..count.., ..x.., sum)[..x..],
+                                        accuracy = 1)), 
+    stat = "count", position = position_fill(vjust = 0.5), color = "white", size = 3) +
+  scale_fill_manual(values = c("0" = "blue", "1" = "lightcoral"), labels = c("Non-Récidive", "Récidive")) +  # Attribution des couleurs
+  labs(title = "Taux de récidive par classe d'infraction",
+       x = "Classe d'infraction",
+       y = "Proportion",
+       fill = "Récidive") + 
+  coord_flip() +  # Inverser l'axe pour meilleure lisibilité
+  theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+- **Taux de récidive par classe d'infraction: **  Les taux de récidive **varient considérablement** selon la classe d'infraction :  
+
+_Special Sentence 2005_ a effectivement le taux de récidive le plus élevé, ce qui suggère que cette peine n'est pas efficace pour prévenir la récidive malgré son intention dissuasive.
+Viennent ensuite les _Felony - Mandatory Minimum et Felony - Enhancement to Original Penalty_, montrant que même des peines sévères n'empêchent pas la récidive. Cela peut indiquer un manque de réhabilitation pour ces condamnations.
+Les _Serious Misdemeanor_ suivent avec un taux de récidive modéré, tandis que les Felony A ont le taux le plus faible, probablement en raison de peines longues réduisant le risque de récidive à court terme.
+En résumé, les peines spéciales et les crimes avec des pénalités accrues n'empêchent pas la récidive, suggérant une nécessité de revoir les stratégies de réinsertion pour ces groupes. Les crimes graves (Felony A et B), bien que sévères, semblent mieux dissuader la récidive.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+
+ggplot(iowa_data %>% filter(!is.na(survival_months)), aes(x = survival_months)) +
+  geom_histogram(binwidth = 3, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Distribution du semps de survie (en Mois) avant réincarcération",
+       x = "Temps de survie (mois)",
+       y = "Nombre d'individus") +
+  theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+- **Distribution du Temps de Survie avant Réincarcération: **  La distribution montre que **la majorité des récidives surviennent dans les 10 ou les 15 premiers mois** suivant la libération, avec un **déclin progressif** ensuite. Cela suggère une **période critique de vulnérabilité** juste après la sortie de prison. Très peu de récidives surviennent après **30 mois**, ce qui peut indiquer une **stabilisation** du comportement des individus restants.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+
+# Filtrer les données pour éviter les NA
+iowa_data_filtered <- iowa_data %>%
+  filter(!is.na(sex), !is.na(race), !is.na(reincarcerated))
+
+# Histogramme empilé de la récidive par sexe
+ggplot(iowa_data_filtered, aes(x = sex, fill = as.factor(reincarcerated))) +
+  geom_bar(position = "fill") +  
+  geom_text(aes(label = scales::percent(..count.. / tapply(..count.., ..x.., sum)[..x..],
+                                        accuracy = 1)), 
+    stat = "count", position = position_fill(vjust = 0.5), color = "white", size = 3) +
+  scale_fill_manual(values = c("0" = "blue", "1" = "lightcoral"), 
+                    labels = c("Non-Récidive", "Récidive")) +  
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +  # Échelle 0-100%
+  labs(title = "Taux de récidive par sexe", x = "Sexe", y = "Proportion (%)",
+       fill = "Récidive") + theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+- **Taux de récidive par sexe: **  Les **hommes** ont un **taux de récidive plus élevé** que les **femmes**, bien que l'écart ne soit pas très prononcé. Cela confirme les tendances observées dans d'autres études criminologiques où les hommes sont **plus enclins à récidiver**. Le **taux de non-récidive** reste majoritaire pour les deux sexes.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+
+# Histogramme empilé de la récidive par race (horizontal)
+ggplot(iowa_data_filtered, aes(x = race, fill = as.factor(reincarcerated))) +
+  geom_bar(position = "fill") +  
+  geom_text(aes(label = scales::percent(..count.. / tapply(..count.., ..x.., sum)[..x..],
+                                        accuracy = 1)), 
+    stat = "count", position = position_fill(vjust = 0.5), color = "white", size = 3) +
+  scale_fill_manual(values = c("0" = "blue", "1" = "lightcoral"), labels = c("Non-Récidive", "Récidive")) +  
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +  # Échelle 0-100%
+  labs(title = "Taux de récidive par race",
+       x = "Race",
+       y = "Proportion (%)",
+       fill = "Récidive") +
+  coord_flip() +  # Met l'histogramme en horizontal
+  theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+- **Taux de récidive par race: **  Les _Asian or Pacific Islander_ ont le taux de récidive le plus faible, tandis que les American Indian or Alaska Native présentent le taux le plus élevé. Les _Blacks, Hispanics, et Whites_ ont des taux de récidive relativement similaires, avec une légère différence en défaveur des Blacks et Hispanics.
+
+Ces résultats montrent une variation notable selon les groupes raciaux, en particulier pour les _American Indian or Alaska Native_. Cela pourrait indiquer des différences dans les expériences de réinsertion ou dans les circonstances socio-économiques après la libération. Les _Asian or Pacific Islander_ ayant le taux le plus faible pourraient refléter des différences culturelles ou communautaires favorisant la réintégration.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+
+# Filtrer les NA pour éviter les erreurs
+iowa_data_filtered <- iowa_data %>%
+  filter(!is.na(supervision_type), !is.na(reincarcerated))
+
+# Création du graphique
+ggplot(iowa_data_filtered, aes(x = supervision_type, fill = as.factor(reincarcerated))) +
+  geom_bar(position = "fill") +  # Barres empilées normalisées à 100%
+  geom_text(aes(label = scales::percent(..count.. / tapply(..count.., ..x.., sum)[..x..],
+                                        accuracy = 1)), 
+    stat = "count", position = position_fill(vjust = 0.5), color = "white", size = 3) +
+  scale_fill_manual(values = c("0" = "blue", "1" = "lightcoral"), labels = c("Non-Récidive", "Récidive")) +  
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +  # Échelle 0-100%
+  labs(title = "Taux de récidive par type de supervision",
+       x = "Type de supervision",
+       y = "Proportion (%)",
+       fill = "Récidive") +
+  theme_minimal()
+
+
+rm(iowa_data_filtered)
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+- **Taux de récidive par type de supervision: **  Les individus sous **"Work Release"** ont un **taux de récidive légèrement plus élevé** que ceux libérés après une peine complète en **prison**. Cela peut indiquer que **l'intégration progressive** dans la société via le **"Work Release"** n’est pas toujours suffisante pour **prévenir la récidive**, ou que ces individus sont **plus à risque** dès le départ.  
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Calcul du nombre d'individus par raison de libération
+release_reason_stats <- iowa_data %>%
+  filter(!is.na(supervision_end_reason)) %>%
+  group_by(supervision_end_reason) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  mutate(Percent = (Count / sum(Count)) * 100)  # Calcul des pourcentages
+
+plot_ly(
+  release_reason_stats,
+  labels = ~supervision_end_reason,
+  values = ~Percent,
+  type = 'pie',
+  textinfo = 'label+percent',
+  hoverinfo = 'text',
+  text = ~paste0(supervision_end_reason, "\nEffectif: ", Count, "\nPourcentage: ", round(Percent, 1), "%"),
+  marker = list(colors = RColorBrewer::brewer.pal(8, "Dark2"))  # Palette de couleurs
+) %>%
+  layout(title = "Répartition des Motifs de Libération")
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+ **Répartition des Motifs de Libération**  
+Concernant le graphique ( **Répartition des Motifs de Libération**), le **motif de libération prédominant est la libération conditionnelle ("Parole Granted", 65.4%)**, suivi de la **fin de peine ("Discharged - Expiration of Sentence", 19%)**. Cela montre une **dépendance significative au système de libération conditionnelle**, ce qui pourrait expliquer un **risque accru de récidive** si le suivi post-libération est insuffisant. La **libération sous "Special Sentence"** représente **4.46%**, mais son **taux de récidive élevé** observé dans d'autres graphiques mérite une analyse approfondie pour évaluer l'efficacité de cette mesure.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Filtrer les individus réincarcérés
+iowa_reincarcerated <- iowa_data %>%
+  filter(reincarcerated == 1, !is.na(offense_type), !is.na(offense_class))
+
+# Agréger les données par type d'infraction
+offense_type_stats <- iowa_reincarcerated %>%
+  group_by(offense_type) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  mutate(Percent = (Count / sum(Count)) * 100)
+
+# Graphique interactif pour offense_type
+pie_offense_type <- plot_ly(
+  offense_type_stats,
+  labels = ~offense_type,
+  values = ~Percent,
+  type = 'pie',
+  textinfo = 'label+percent',
+  hoverinfo = 'text',
+  text = ~paste0(offense_type, "\nEffectif: ", Count, "\nPourcentage: ", round(Percent, 1), "%"),
+  marker = list(colors = RColorBrewer::brewer.pal(length(unique(offense_type_stats$offense_type)), "Set2"))
+) %>%
+  layout(title = "Répartition des Individus Réincarcérés par Type d'Infraction")
+
+# Affichage du graphique
+pie_offense_type
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Enfin le graphique (**Répartition des Individus Réincarcérés par Type d'Infraction**),nous permet de dire que les **infractions contre la propriété (Property, 29.4%)** et les **délits liés à la drogue (Drug, 26.5%)** sont les **principaux motifs de réincarcération**, suivis des **crimes violents (Violent, 19.4%)**. La **dominance des délits liés à la propriété et à la drogue** suggère que **les récidivistes retournent souvent à des crimes liés à des motivations économiques** ou **à la dépendance**. Les **violations de l'ordre public (Public Order, 10.4%)** et les **autres délits (Other, 14.3%)** sont moins fréquents, mais indiquent une **variété de comportements criminels** parmi les récidivistes. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Agréger les données par classe d'infraction
+offense_class_stats <- iowa_reincarcerated %>%
+  group_by(offense_class) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  mutate(Percent = (Count / sum(Count)) * 100)
+
+# Graphique interactif pour offense_class
+pie_offense_class <- plot_ly(
+  offense_class_stats,
+  labels = ~offense_class,
+  values = ~Percent,
+  type = 'pie',
+  textinfo = 'label+percent',
+  hoverinfo = 'text',
+  text = ~paste0(offense_class, "\nEffectif: ", Count, "\nPourcentage: ", round(Percent, 1), "%"),
+  marker = list(colors = RColorBrewer::brewer.pal(length(unique(offense_class_stats$offense_class)), "Set3"))
+) %>%
+  layout(title = "Répartition des Individus Réincarcérés par Classe d'Infraction")
+
+# Affichage du graphique
+pie_offense_class
+
+rm(iowa_reincarcerated, offense_type_stats, offense_class_stats, release_reason_stats)
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Le graphique(**Répartition des Individus Réincarcérés par Classe d'Infraction**) montre que la majorité des récidivistes ont été réincarcérés pour des **infractions de classe D Felony (39.9%)** et **C Felony (28.5%)**, suivies des **Aggravated Misdemeanor (13.1%)**. Les infractions **plus graves (A Felony, B Felony)** représentent une **part extrêmement faible**, ce qui suggère que **les récidivistes ont tendance à commettre des crimes moins graves** lors de leurs récidives. Cela pourrait indiquer soit une **intensité criminelle réduite**, soit une **efficacité partielle des programmes de réinsertion**.
+
+ 
+# **Estimation non paramétrique des durées de survie**
+
+## **Estimateur de Kaplan-Meier**
+
+**NB:** Dans le cadre de notre étude sur la récidive carcérale en Iowa, nous avons rencontré un défi méthodologique important : la gestion des individus non-récidivistes dans notre analyse de survie. En effet, la base de données fournit une variable survival_months, qui indique la durée avant réincarcération pour les individus ayant récidivé. Cependant, pour les individus n'ayant pas récidivé, cette variable est absente (NA), ce qui pose un problème d’interprétation et d’intégration dans nos modèles de survie.
+
+__Pourquoi est-il nécessaire de fixer une durée maximale de suivi ?__
+
+L’analyse de survie repose sur l’observation de la durée jusqu'à un événement (ici, la réincarcération). Pour les individus ayant récidivé, survival_months représente cette durée. En revanche, pour les non-récidivistes, nous savons uniquement qu'ils n'ont pas récidivé pendant la période d'étude, sans connaître leur durée exacte d'observation.
+
+Si nous laissons ces valeurs à NA, les modèles de survie (Kaplan-Meier, Nelson-Aalen, ou Cox) ignorent ces individus, ce qui entraîne un biais d'échantillonnage et une sous-estimation des probabilités de survie.
+
+__Solution adoptée : Censure à droite avec une durée maximale de suivi__
+
+Pour résoudre ce problème, nous avons appliqué une approche courante en analyse de survie, appelée censure à droite, en attribuant aux non-récidivistes une durée d'observation maximale, qui est de 42 mois .
+
+__Pourquoi 42 mois ?__
+
+Dans notre jeu de données, la durée maximale observée avant récidive est de 36.5 mois. Pour garantir que les non-récidivistes sont bien pris en compte sans introduire d’ambiguïté sur les limites du suivi, nous avons fixé la durée maximale de survie à 42 mois.
+
+Ce choix repose sur les considérations suivantes :
+
+  Respect du cadre temporel de l’étude : La période d’observation couvre jusqu'à 3 ans (36 mois) après la sortie de prison, mais il est prudent d’ajouter une légère marge pour éviter des effets de bord.
+  
+  Garantir une bonne prise en compte des non-récidivistes : En leur attribuant une durée d'observation légèrement supérieure au maximum observé chez les récidivistes, nous évitons d’éliminer des individus censurés de manière arbitraire.
+  
+  Consistance avec les analyses futures : Cette valeur garantit que l’ensemble des individus sont considérés dans l’analyse tout en maintenant une cohérence avec les données existantes.
+
+Conséquences sur l’interprétation des résultats
+
+  Un individu ayant survival_months = X > 36.5 avec reincarcerated = 0 signifie qu’il n’a pas récidivé dans les 3 ans suivant sa sortie.
+  
+  Un individu ayant survival_months = X < 36.5 avec reincarcerated = 1 signifie qu’il a récidivé après X mois.
+
+Ainsi, notre analyse de survie à l’aide de Kaplan-Meier et Nelson-Aalen reflète correctement la dynamique de récidive au sein des cohortes étudiées.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Fixer la durée maximale d'observation
+max_followup <- 42  
+
+# Remplacer NA dans survival_months pour les individus non récidivistes
+iowa_data <- iowa_data %>%
+  mutate(survival_months = ifelse(is.na(survival_months), max_followup, survival_months))
+
+iowa_data <- iowa_data %>%
+  mutate(reincarcerated = as.numeric(as.character(reincarcerated)))
+
+# Création de l’objet de survie : temps = survival_months, événement = réincacerated
+iowa_surv <- Surv(time = iowa_data$survival_months, event = iowa_data$reincarcerated)
+
+# Ajustement du modèle de Kaplan-Meier
+iowa_fit <- survfit(iowa_surv ~ 1, data = iowa_data)
+
+# Tracé de la fonction de survie
+ggsurvfit(iowa_fit) +
+  add_confidence_interval() + 
+  add_risktable() +
+  labs(
+    title = "Courbe de survie Kaplan-Meier - Récidive en Iowa",
+    x = "Temps (mois)",
+    y = "Probabilité de non-récidive"
+  ) +
+  theme_minimal()  # Ajout d'un thème propre
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+La probabilité de non-récidive diminue progressivement avec le temps, passant de 100% à environ 70% après 27.5 mois, et continue de diminuer par la suite. Cela signifie qu'environ 30% des individus récidivent dans les 2 à 3 ans suivant leur libération. La pente est relativement régulière, montrant un risque de récidive constant sur toute la période, sans point de rupture significatif. Cela suggère que le risque de récidive est présent de manière continue après la libération, nécessitant un suivi prolongé.
+
+### Comparaison de groupes: courbe Kaplan-Meier par sexe
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+iowa_fit_sex <- survfit(Surv(survival_months, reincarcerated) ~ sex, data = iowa_data)
+
+# Tracer la courbe Kaplan-Meier par sexe
+ggsurvfit(iowa_fit_sex) +
+  add_confidence_interval() +  # Ajout de l'intervalle de confiance
+  add_risktable() +            # Ajout du tableau de risque sous la courbe
+  scale_color_manual(values = c("blue", "red")) +  # Définition des couleurs pour chaque sexe
+  labs(
+    title = "Courbe de survie Kaplan-Meier - Récidive en fonction du sexe",
+    x = "Temps (mois)",
+    y = "Probabilité de non-récidive",
+    color = "Sexe"
+  ) +
+  theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Les hommes ont une probabilité de non-récidive plus faible que les femmes tout au long de la période observée.
+Les femmes montrent une meilleure survie sans récidive, avec environ 72% n'ayant pas récidivé après 40 mois, contre 63% pour les hommes.
+La différence est statistiquement significative, indiquant que le sexe est un facteur prédictif important de la récidive.
+Cela confirme des tendances criminologiques où les femmes récidivent généralement moins souvent que les hommes.
+
+### Comparaison de groupes: courbe Kaplan-Meier par type d'infraction
+```{r, fig.width=10, fig.height=6, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Modèle de survie par offense_type
+iowa_fit_offense <- survfit(Surv(survival_months, reincarcerated) ~ offense_type, data = iowa_data)
+# Courbe de survie par offense_type
+ggsurvfit(iowa_fit_offense) +
+  add_confidence_interval() +
+  add_risktable() +
+  labs(title = "Courbe de survie Kaplan-Meier - Récidive par Type d'Infraction",
+       x = "Temps Temps (mois)", y = "Probabilité de non-récidive", color = "Type d'Infraction") +
+  theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Les infractions "Other" (jaune-marron) présentent la récidive la plus rapide, avec une chute brutale de la probabilité de non-récidive dans les premiers mois. De plus, l’intervalle de confiance est plus large pour ce groupe, indiquant une incertitude plus grande dans l’estimation du risque de récidive. Cela peut être dû à un effectif plus faible ou à une hétérogénéité des infractions classées "Other". Il serait donc plus pertinent d’avoir des précisions sur la nature exacte des crimes inclus dans cette catégorie.
+
+Les infractions liées aux biens ("Property", en vert) et aux drogues ("Drug", en rouge) suivent une tendance similaire, avec une baisse progressive de la probabilité de non-récidive. Toutefois, une inversion se produit après environ 20 mois :
+
+Dans les premiers mois, les infractions contre la propriété récidivent plus vite, probablement car ces crimes sont souvent motivés par des besoins économiques immédiats (ex: vols, cambriolages).
+
+Après environ 20 mois, la situation change :
+        Les infractions liées à la drogue affichent une récidive plus tardive mais plus persistante.
+        Cela pourrait s'expliquer par un effet de rechute progressive dans l’addiction. Certains détenus libérés parviennent initialement à éviter la récidive, mais finissent par rechuter après un certain temps, entraînant de nouvelles infractions liées à la drogue.
+        À l’inverse, les récidivistes liés aux infractions contre la propriété semblent mieux stabiliser leur comportement criminel, soit grâce à une réinsertion réussie, soit via d’autres facteurs sociaux (emploi, famille, suivi judiciaire).
+
+Enfin, les infractions violentes ("Violent", en violet) et celles contre l’ordre public ("Public Order", en bleu clair) présentent les meilleures probabilités de non-récidive sur toute la période. Cela signifie que les individus ayant commis ces infractions mettent plus de temps à récidiver, possiblement en raison de peines plus longues ou d’un suivi post-incarcération plus strict.
+
+### Comparaison de groupes: courbe Kaplan-Meier par type de supervision
+```{r, fig.width=10, fig.height=6, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Modèle de survie par supervision_type
+iowa_fit_supervision <- survfit(Surv(survival_months, reincarcerated) ~ supervision_type, data = iowa_data)
+# Courbe de survie par supervision_type
+ggsurvfit(iowa_fit_supervision) +
+  add_confidence_interval() +
+  add_risktable() +
+  labs(title = "Courbe de survie Kaplan-Meier - Récidive par Type de Supervision",
+       x = "Temps (mois)", y = "Probabilité de non-récidive", color = "Type de Supervision") +
+  theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Les individus sous **Work Release** récidivent **plus rapidement** que ceux libérés directement après leur peine en **prison**. L’**intervalle de confiance** du groupe **Work Release** est **plus large**, ce qui peut refléter une **variabilité plus élevée** dans le risque de récidive pour ces individus.
+
+Après **40 mois**, la **probabilité de non-récidive** est **plus faible** pour le groupe **Work Release** que pour le groupe **Prison**, confirmant un **risque de récidive plus élevé**. En revanche, l’**intervalle de confiance plus serré** pour le groupe **Prison** indique une **estimation plus stable** de la probabilité de non-récidive.
+
+Dès les **premiers mois**, un **écart marqué** apparaît entre les deux groupes, suggérant que le programme **Work Release n’empêche pas nécessairement une récidive rapide**.
+
+**Hypothèses et Explications Possibles :**  
+
+✔ **Moins de supervision après Work Release ?**  
+→ Les individus placés en **Work Release** peuvent bénéficier d’un **suivi post-libération moins strict** ou **rencontrer plus de difficultés d’adaptation** après cette transition.  
+
+✔ **Un profil de détenus plus à risque ?**  
+→ Il est possible que **les détenus sélectionnés pour Work Release soient déjà plus à risque de récidiver**, expliquant leur taux de récidive plus élevé.  
+
+✔ **Un impact limité sur la réinsertion ?**  
+→ Le programme **Work Release** vise à **faciliter la réintégration**, mais s’il **n’améliore pas significativement l’accès à l’emploi ou au logement**, cela pourrait expliquer un **taux de récidive plus élevé**.
+
+
+**Conclusion :**  
+
+En somme, **les détenus sous Work Release récidivent plus rapidement et plus souvent** que ceux libérés après avoir purgé leur peine en **prison**.  
+
+L’**efficacité du programme Work Release mérite d’être réévaluée** : un **accompagnement renforcé après la libération** pourrait être nécessaire pour **réduire le risque de récidive**.  
+
+Enfin, des **études supplémentaires** devraient explorer les **facteurs expliquant cette différence** :  
+- Est-elle **liée au profil des détenus** ?  
+- **Au suivi post-libération ?**  
+- **À des difficultés spécifiques d’adaptation à la société ?**  
+
+### Comparaison de groupes: courbe Kaplan-Meier par race
+```{r, fig.width=15, fig.height=9, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Modèle de survie par race
+iowa_fit_race <- survfit(Surv(survival_months, reincarcerated) ~ race, data = iowa_data)
+# Courbe de survie par type de race
+ggsurvfit(iowa_fit_race) +
+  add_confidence_interval() +
+  add_risktable() +
+  labs(title = "Courbe de survie Kaplan-Meier - Récidive par race",
+       x = "Temps (mois)", y = "Probabilité de non-récidive", color = "race") +
+  theme_minimal()
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+**Les Amérindiens/Alaska Natives ont le taux de récidive le plus rapide**, avec une grande **variabilité individuelle**. Leur **faible effectif pourrait influencer cette tendance**, nécessitant une analyse plus approfondie.  
+
+**Les Asiatiques/Insulaires du Pacifique semblent mieux résister à la récidive**, mais l’**incertitude statistique élevée** rend cette conclusion fragile.  
+
+**Les Noirs, Hispaniques et Blancs suivent une tendance plus stable et comparable**, sans écart marquant permettant d’affirmer des différences significatives.  
+
+**Les sauts observés sur certaines courbes (notamment les Amérindiens/Alaska Natives) suggèrent une récidive en "paliers" plutôt que continue, probablement due à des sous-groupes récidivant soudainement.**  
+
+**Conclusion :** Pour ces trois groupes, la survie sans récidive suit **une tendance similaire**, sans disparités majeures visibles sur cette courbe.
+Les tendances observées pour les groupes aux effectifs les plus faibles doivent être interprétées avec prudence. Il serait pertinent d’examiner des **données supplémentaires** pour confirmer ces différences et adapter les politiques de réinsertion en conséquence. 
+
+## **Estimateur de Nelson-Aalen**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Estimation du hasard cumulé par race
+iowa_FH_fit <- survfit(iowa_surv ~ 1, data = iowa_data, 
+                       type = "fleming-harrington")
+
+# Tracé du hasard cumulé (Nelson-Aalen) avec légende
+plot(iowa_FH_fit, fun = "cumhaz", 
+     main = "Estimateur de Nelson-Aalen de la fonction de risque cumulé",
+     xlab = "Temps (mois)", 
+     ylab = "Risque cumulé de récidive", 
+     col = "red", lwd = 2, conf.int = TRUE, lty.conf = "dashed")
+
+# Ajout d'une légende pour distinguer la courbe principale et l'intervalle de confiance
+legend("topleft", legend = c("Fonction de risque cumulé", "Intervalle de confiance 95%"),
+       col = c("red", "red"), lwd = c(2, 1), lty = c(1, 2), bty = "n")
+
+
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+✔ Un risque de récidive qui s’accumule progressivement : L’augmentation continue du hasard cumulé montre que les anciens détenus restent exposés à un risque de récidive tout au long de la période observée.
+
+✔ Un suivi sur le long terme est nécessaire : Puisque le risque ne se stabilise pas, des politiques de réinsertion doivent être mises en place durablement pour minimiser la récidive.
+
+✔ L’absence de rupture indique une répartition homogène du risque : Il n’y a pas de moment critique où le risque explose ou ralentit, ce qui suggère une nécessité de prévention dès la sortie de prison et sur une période prolongée.
+
+✔ L’intervalle de confiance est stable, garantissant une bonne fiabilité de l’estimation.
+
+✔ Une analyse plus fine des sous-groupes (par type d’infraction, âge, etc.) pourrait révéler des différences dans le rythme de récidive, permettant d’ajuster les politiques de réinsertion en fonction des profils les plus vulnérables.
+
+**NB:** Vous trouverez en annexe l'Estimateur de Nelson-Aalen de la fonction de risque cumulé par groupe.
+
+## **Test du log-rank**
+
+L’analyse de survie menée sur la récidive des anciens détenus a révélé **des écarts significatifs entre certains groupes**, notamment en fonction du sexe et de l’origine raciale. Pour vérifier si ces différences sont **statistiquement significatives**, nous avons retenu l’application de **tests du log-rank** sur deux comparaisons clés : **hommes vs femmes** et **différentes races**.  
+
+La **comparaison entre hommes et femmes** est justifiée par l’observation d’un **risque cumulé de récidive plus élevé chez les hommes**. Le test du log-rank permettra de confirmer si ces différences sont **réelles et non dues au hasard**, et ainsi d’orienter **les politiques de réinsertion différenciées** en fonction du sexe.  
+
+La **comparaison entre groupes raciaux** vise à détecter d’éventuelles **inégalités structurelles** dans la récidive. Nos analyses ont montré que **les Amérindiens/Alaska Natives présentent un risque de récidive beaucoup plus élevé**, tandis que les **Blancs et Asiatiques récidivent moins**. Vérifier statistiquement ces écarts permettrait de justifier des **réformes ciblées pour améliorer la réinsertion des groupes les plus vulnérables**.  
+
+Si les résultats des tests du log-rank confirment que ces différences sont **significatives**, cela donnerait des bases solides pour **adapter les programmes de suivi post-libération**, améliorer **l’accompagnement social des détenus à risque**, et **réduire les inégalités dans la réinsertion**. En somme, ces tests apporteraient des **éléments concrets pour guider des politiques publiques plus efficaces dans la prévention de la récidive**. 
+
+## **Test du log-rank par sexe**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Test du log-rank
+logrank_sex <- survdiff(Surv(survival_months, reincarcerated) ~ sex, data = iowa_data)
+logrank_sex
+```
+
+<h4 style="text-align:left;">INTERPRETATION:</h4>
+
+Le test du log-rank confirme que la différence de récidive entre hommes et femmes est statistiquement significative (p < 0.05). Les femmes ont une probabilité de récidive plus faible que les hommes, comme l’avaient déjà suggéré les analyses graphiques. L’écart observé ne pouvant être attribué au hasard, cela justifie l’adoption de politiques de réinsertion différenciées selon le sexe afin d’optimiser la prévention de la récidive.
+
+Ces résultats soulignent l’importance d’un suivi post-libération renforcé pour les hommes, dont le risque de récidive est significativement plus élevé. À l’inverse, les femmes pourraient bénéficier de programmes d’accompagnement adaptés, tenant compte des facteurs influençant leur meilleure survie sans récidive. L’adaptation des politiques de réinsertion en fonction du sexe apparaît ainsi comme une mesure nécessaire pour réduire efficacement la récidive et améliorer la réinsertion des anciens détenus. 
+
+
+## **Test du log-rank par race**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Test du log-rank
+logrank_race <- survdiff(Surv(survival_months, reincarcerated) ~ race, data = iowa_data)
+logrank_race
+```
+
+<h4 style="text-align:left;">INTERPRETATION:</h4>
+
+Le test du log-rank pour la comparaison des races montre que les différences de récidive entre groupes raciaux ne sont pas statistiquement significatives (p = 0.4). Bien que les Amérindiens/Alaska Natives aient un taux de récidive observé plus élevé que prévu, et que d’autres groupes présentent de légers écarts, ces variations ne sont pas assez marquées pour être considérées comme non dues au hasard.
+
+Ainsi, on ne peut pas conclure que la race influence directement la récidive. D’autres facteurs, comme le type d’infraction, le suivi post-libération ou les conditions de réinsertion, pourraient être plus déterminants. Une analyse plus approfondie via un modèle de Cox multivarié pourrait aider à identifier les véritables facteurs de risque de récidive.
+
+
+# **Modélisation du risque de réincarcération**
+
+## **Modèle de Cox semi-paramétrique**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Ajustement du modèle de Cox
+cox_model <- coxph(Surv(survival_months, reincarcerated) ~ sex + race + age + offense_type + supervision_type, data = iowa_data)
+
+# Résumé du modèle
+summary(cox_model)
+```
+
+<h4 style="text-align:left;">INTERPRETATION:</h4>
+
+Le modèle de Cox estime l'impact de plusieurs variables (sexe, race, âge, type d’infraction, type de supervision) sur le **risque de récidive**. L’interprétation des **coefficients (coef)** et des **rapports de risque (exp(coef))** permet d’identifier les **facteurs influençant significativement la récidive**.  
+
+**Facteurs augmentant significativement le risque de récidive :** 
+
+Le sexe masculin (HR = 1.46, p < 0.001) → Un homme a un risque de récidive de 46% plus élevé qu’une femme, ce qui confirme la nécessité d’un suivi renforcé des hommes après libération.
+
+Le type d’infraction "Other" (HR = 1.72, p < 0.001) → Les individus ayant commis une infraction classée "Other" ont un risque de récidive 72% plus élevé que ceux ayant commis une infraction de classe "Drug", ce qui suggère qu’ils sont plus vulnérables à la rechute.
+
+Le type de supervision "Work Release" (HR = 1.37, p < 0.001) → Les individus libérés sous Work Release ont un risque de récidive 37% plus élevé que ceux libérés après une peine complète en prison, indiquant que ce programme pourrait nécessiter une révision pour améliorer son efficacité.
+
+**Facteurs réduisant significativement le risque de récidive :**  
+
+L’âge (HR = 0.98, p < 0.001) → Chaque année supplémentaire réduit le risque de récidive de 2%. Ainsi, un écart d’une décennie entre deux individus diminue le risque de près de 18% (exp(-0.019 * 10) = 0.82). Cela souligne l’importance de stratégies de réinsertion spécifiques aux jeunes détenus, qui sont plus enclins à récidiver.
+
+Les infractions contre l’ordre public (HR = 0.78, p < 0.05) et les infractions violentes (HR = 0.65, p < 0.001) sont associées à un risque de récidive plus faible par rapport à la catégorie de référence. Cela pourrait s’expliquer par des peines plus longues et un suivi post-incarcération plus strict pour ces types de crimes.  
+
+**Facteurs non significatifs :**  
+La race n'a pas d'effet significatif sur la récidive (p > 0.05 pour toutes les catégories raciales), suggérant que les différences observées dans les courbes de survie ne sont pas directement liées à la race une fois ajustées pour d'autres variables.
+Les infractions liées à la propriété ne montrent pas d’impact significatif sur la récidive.  
+
+Le modèle de Cox confirme que le sexe et le type de supervision sont des facteurs déterminants de la récidive, avec un risque accru pour les hommes et les détenus en Work Release, justifiant ainsi des politiques de suivi renforcé pour ces groupes. L’âge joue un rôle protecteur, les détenus plus âgés ayant un risque de récidive plus faible, ce qui suggère que les stratégies de réinsertion devraient cibler en priorité les plus jeunes. Le type d’infraction influence également la récidive : les infractions classées "Other" présentent le risque le plus élevé, tandis que les infractions violentes et celles contre l’ordre public sont associées à un risque plus faible. En revanche, la race n’a pas d’effet significatif sur la récidive, remettant en question l'hypothèse de disparités raciales après ajustement pour d'autres variables.
+
+### **Vérification de l'hypothèse des risques proportionnels**
+
+Le modèle de Cox suppose que les effets des covariables ne varient pas dans le temps.
+On teste cela avec les résidus de Schoenfeld.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Test de Schoenfeld pour vérifier la proportionnalité des risques
+cox.zph(cox_model)
+```
+
+<h4 style="text-align:left;">INTERPRETATION:</h4>
+
+Le test de Schoenfeld examine si les effets des covariables restent constants dans le temps.
+Si p < 0.05, l'hypothèse des risques proportionnels est violée pour cette variable
+
+Sex, âge et offense type respectent l’hypothèse → OK 👍
+
+Race est limite (p = 0.0536) → On peut tester avec un effet temps-dépendant
+
+Supervision type viole l’hypothèse (p = 0.0120) → Il faut modifier le modèle
+
+Le test global (p = 0.0057) est significatif → Il y a au moins une violation
+
+Cox semi-paramétrique est problématique, car au moins une variable viole l’hypothèse.
+
+**Conclusion :** Faut-il garder Cox ou passer à un modèle paramétrique ?
+
+Comme l’hypothèse des risques proportionnels est violée, on peut tester un modèle paramétrique, en particulier Weibull.
+
+## **Modèle paramétrique**
+
+### **Modèle Weibull**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Ajustement du modèle Weibull
+weibull_model <- survreg(Surv(survival_months, reincarcerated) ~ sex + race + age + offense_type + supervision_type,
+                         data = iowa_data, dist = "weibull")
+
+# Résumé du modèle Weibull
+summary(weibull_model)
+```
+
+<h4 style="text-align:left;">INTERPRETATION:</h4>
+
+Le modèle de survie paramétrique ajusté utilise une **distribution de Weibull** pour estimer l'effet des variables explicatives sur le **temps avant la récidive**. Contrairement au modèle de Cox, qui est semi-paramétrique, ce modèle suppose une structure paramétrique spécifique pour la durée de survie, ce qui permet d’obtenir des estimations plus précises sur la forme du risque de récidive au fil du temps.  
+
+**Facteurs augmentant le temps avant récidive (effet protecteur, coefficients positifs)**  
+Certaines variables sont associées à un **temps de récidive plus long**, indiquant qu’elles ralentissent le processus de réincarcération. L’âge est un facteur clé (**coef = 0.0197, p < 0.001**) : **chaque année supplémentaire augmente significativement le temps avant récidive**, confirmant que les détenus plus âgés ont un risque plus faible de retourner en prison rapidement. De plus, les individus ayant commis des **infractions violentes** (**coef = 0.4364, p < 0.001**) ou des **infractions contre l’ordre public** (**coef = 0.2529, p < 0.05**) mettent plus de temps avant de récidiver. Cette tendance peut être expliquée par des **peines plus longues et un suivi post-libération plus strict pour ces infractions**.  
+
+**Facteurs réduisant le temps avant récidive (effet accélérateur, coefficients négatifs)**  
+À l’inverse, certaines variables sont associées à une récidive plus rapide. **Être un homme** (**coef = -0.3820, p < 0.001**) réduit significativement le temps avant récidive, confirmant que les hommes récidivent plus vite que les femmes. De même, les individus ayant commis des **infractions classées "Other"** (**coef = -0.5494, p < 0.001**) sont **plus susceptibles de récidiver rapidement**, ce qui souligne l'importance d'un **suivi renforcé pour ces détenus**. Enfin, les détenus sous **Work Release** (**coef = -0.3214, p < 0.001**) **récidivent plus rapidement que ceux libérés après une peine complète**, ce qui remet en question l’efficacité du programme et suggère un **besoin d’amélioration dans l’accompagnement post-libération**.  
+
+**Facteurs non significatifs (p > 0.05)**  
+Certaines variables n’ont pas d’effet significatif sur le temps avant récidive. **La race ne semble pas influencer le délai de récidive**, ce qui confirme les résultats du modèle de Cox où les différences raciales observées dans les courbes de survie ne sont pas statistiquement significatives après ajustement pour d’autres variables. De plus, les **infractions contre la propriété** n’affectent pas significativement le temps avant récidive, ce qui suggère que leur impact est similaire à celui de la catégorie de référence.  
+
+**Analyse de la distribution et de la qualité du modèle**  
+Le paramètre de l’échelle (**scale = 0.999**) est **proche de 1**, indiquant que **le taux de récidive reste relativement constant dans le temps** et ne présente pas d’accélération ou de ralentissement significatif après libération. Le **test du Chi² (p < 0.001)** confirme que le modèle est globalement significatif, validant l’importance des variables incluses dans l’explication du temps avant récidive.  
+
+**Conclusion et Implications**  
+Ce modèle de Weibull met en évidence plusieurs **facteurs influençant le temps avant récidive**. **Les hommes, les individus en Work Release et ceux ayant commis des infractions "Other" récidivent plus rapidement**, ce qui souligne l’importance de politiques de suivi post-libération adaptées à ces groupes. **Les détenus plus âgés, ceux ayant commis des infractions violentes ou contre l’ordre public mettent plus de temps à récidiver**, possiblement en raison de peines plus longues et d’un suivi plus strict. **La race ne semble pas être un facteur déterminant du temps avant récidive**, ce qui suggère que d’autres variables, comme les conditions de réinsertion, jouent un rôle plus important. 
+
+**NB:** Vous trouverez en annexe d'autres tests à titre exploratoire.
+
+# **Apprentissage machine pour la prédiction de la récidive**
+
+## Forêt Aléatoire de survie
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+donRSF <- iowa_data |> dplyr::select(survival_months, reincarcerated,sex, race, age, 
+                                     offense_type, supervision_type) |> 
+  mutate(sex = as.factor(sex), race = as.factor(race), offense_type = as.factor(offense_type),
+         supervision_type = as.factor(supervision_type))
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Configurer le parallélisme
+n_cores <- detectCores() - 2  # Garde un cœur libre pour éviter la surcharge
+cl <- makeCluster(n_cores)     # Crée le cluster de travailleurs
+registerDoParallel(cl)         # Enregistre le cluster pour le parallélisme
+
+
+# Entraînement de la forêt aléatoire de survie en parallèle
+ModeRSF <- foreach(i = 1:1, .packages = "randomForestSRC") %dopar% {
+  rfsrc(Surv(survival_months, reincarcerated) ~ ., data = donRSF, 
+        ntree = 1000, nsplit = 5, importance = "random", seed = 1234)
+}
+
+ModeRSF <- ModeRSF[[1]]
+
+print(ModeRSF) # Vérifier le modèle
+
+# Arrêter le cluster
+
+```
+
+Les modèles traditionnels de survie, comme **Kaplan-Meier** ou **le modèle de Cox**, offrent une bonne capacité explicative et descriptive. Cependant, leurs performances peuvent être limitées lorsqu'il s'agit de données non linéaires. Pour surmonter ces limitations, les algorithmes d'apprentissage automatique constituent une alternative efficace, permettant de mieux capturer la complexité et la non-linéarité des données.
+
+Dans notre étude, nous avons utilisé **l'algorithme des Forêts Aléatoires de Survie (RSF)** afin de mieux prédire le risque de récidive d’un individu. Une telle approche permettrait d’adapter plus finement les politiques de réinsertion en fonction des caractéristiques spécifiques de chaque personne.
+
+<h4 style="text-align:left;">INTERPRETATION du modèle:</h4>
+
+Dans ce modèle, nous disposons de 3172 observations, dont 1136 individus ayant récidivé. La forêt aléatoire est composée de 1000 arbres, chacun contenant en moyenne 140 à 141 feuilles, avec environ 15 individus par feuille.
+
+L’erreur de prédiction, mesurée par **l’erreur Out-Of-Bag (OOB), est de 0,426**, ce qui indique que le modèle fournit des prédictions significativement meilleures qu’un choix aléatoire.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Graphique des erreurs d'ajustement en fonction du nombre d'arbres
+gg_e <- gg_error(ModeRSF, error = "dev", ci = TRUE) |> filter(!is.na(error))
+
+class(gg_e) <- c("gg_error", class(gg_e))
+
+gg_e <- gg_e |> ggplot() + aes(x = ntree, y = error) + geom_line() +
+  labs(x = "Nombre d'arbres", y = "Erreur de prédiction") +
+  theme_minimal()
+
+# Extraire l'importance des variables
+gg_imp <- data.frame(Variable = names(ModeRSF$importance),
+  Importance = ModeRSF$importance) |>
+  
+  arrange(desc(Importance)) |> 
+  
+  ggplot( aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue", width = 0.5) +
+  coord_flip() +  # Inverser les axes pour une meilleure lisibilité
+  labs(x = "Variables", y = "Importance") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 14))
+
+(gg_e | gg_imp) + 
+  plot_annotation(title = "Erreur de prédiction et importance des variables") &
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+```
+
+Le graphique ci-dessus permet de visualiser **l’erreur de prédiction** en fonction du nombre d’arbres dans le modèle, ainsi que l’**importance** des variables.
+
+À l’exception de la variable **race**, qui présente une importance négative, toutes les autres variables ont une importance positive. Parmi elles, la variable offense_type se distingue comme la plus influente. La structure de cette importance vient confirmer le test des risques proportionnels que nous avions fait plus haut dans le modèle de **COX**.
+
+En ce qui concerne l’évolution de l’erreur, nous observons une fluctuation autour de **0,426**, avec une baisse jusqu’à 600 arbres, suivie d’une légère augmentation par la suite.
+
+Afin d’améliorer la qualité de notre modèle, nous allons procéder à une validation croisée afin d’identifier les meilleurs hyper-paramètres.
+
+## Optimisation par validation croisée K-Fold
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# ---- 1. Définir les paramètres ----
+set.seed(423)  # Reproductibilité
+k <- 5       # Nombre de folds pour la validation croisée
+
+# ---- 2. Créer les folds ----
+folds <- createFolds(donRSF$survival_months, k = k, list = TRUE)
+
+# ---- 3. Définir les hyperparamètres à tester ----
+grid <- expand.grid(
+  ntree = c(200,300,400),   # Nombre d'arbres
+  mtry = c(2,3,4),           # Nombre de variables testées par split
+  nodesize = c(5,10,15)      # Taille minimale des feuilles
+)
+
+# ---- 4. Boucle de validation croisée ----
+results <- data.frame()
+
+for (i in 1:nrow(grid)) {
+  params <- grid[i, ]
+  err_rates <- c()  # Stocker les erreurs pour chaque fold
+
+  for (fold in 1:k) {
+    # Séparer les données en train et test
+    train_data <- donRSF[-folds[[fold]], ]
+    
+    # Entraîner le modèle avec les hyperparamètres actuels
+    # Entraînement de la forêt aléatoire de survie en parallèle
+    model <- foreach(j = 1:1, .packages = "randomForestSRC") %dopar% {
+      rfsrc(Surv(survival_months, reincarcerated) ~ ., 
+                   data = train_data, ntree = params$ntree, 
+                   mtry = params$mtry, nodesize = params$nodesize, seed = 1234)
+          }
+
+    model <- model[[1]]
+    
+    # Calculer l'erreur OOB
+    err_rates <- c(err_rates, get.cindex(model$yvar[,1], model$yvar[,2], model$predicted.oob))
+    }
+  # Sauvegarder la moyenne des erreurs OOB pour ces hyperparamètres
+  results <- rbind(results, data.frame(params, MeanOOB = mean(err_rates)))
+}
+# ---- 5. Sélection des meilleurs paramètres ----
+best_params <- results[which.min(results$MeanOOB), ]
+
+knitr::kable(data.frame(best_params), caption =  "les meilleurs hyperparamètre")
+```
+
+La validation croisé nous permet d'identifier les hyper-paramètres suivant :
+
+* ntree (nombre d'arbres) -> 200
+* mtry (le nombre de variable testées à chaque split) -> 2
+* nodesize (nombre d'individus dans les nœuds terminaux) -> 15
+
+Notre modèle final est alors construit en tenant compte de ces hyper-paramètres
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Entraînement de la forêt aléatoire de survie en parallèle
+ModeRSF <- foreach(i = 1:1, .packages = "randomForestSRC") %dopar% {
+  rfsrc(Surv(survival_months, reincarcerated) ~ ., data = donRSF, 
+        ntree = 200, mtry = 2, modesize = 15 ,nsplit = 5, importance = "random")
+}
+
+ModeRSF <- ModeRSF[[1]]
+
+print(ModeRSF) # Vérifier le modèle
+# Arrêter le cluster
+```
+
+Comme nous le montre la sortie R du modèle, nous avons réussi à réduire l’erreur de prédiction à **0,424**, bien que cette amélioration soit de l’ordre du troisième décimal.
+
+Avec une erreur de prédiction inférieur à 0,5, ce modèle a une meilleure prédiction que ce que peut faire le hasard pure (erreur de prédiction de 0,5).
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Tracer la courbe de survie
+plot(round(ModeRSF$time.interest,2),ModeRSF$survival[1,], type="l", xlab="Temps (En mois)",   
+   ylab="Proba de srurvie en %", col=1, lty=1, lwd=2,
+   main = "la courbe de survie de RSF")
+```
+
+L’analyse du graphique ci-dessus montre que la courbe de survie de la **Forêt Aléatoire de Survie** n’est pas linéaire, contrairement à celle du modèle de **Kaplan-Meier**. Elle décroît par paliers jusqu’à 0,84, contre environ 0,65 pour la courbe de survie de **Kaplan-Meier**.
+
+Cette différence s’explique par le fait que l’**algorithme des Forêts Aléatoires de Survie** prend en compte un plus grand nombre de variables caractéristiques des individus dans la modélisation.
+
+
+# **Choix du meilleur modèle et réentrainement**
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+set.seed(3241)
+don <- donRSF |> dplyr::select(-race)
+ind <- sample(nrow(don), .9*nrow(don))
+
+don_train <- don[ind,]
+don_test <- don[-ind,]
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Ajustement du modèle de Cox
+cox_model <- coxph(Surv(survival_months, reincarcerated) ~., data = don_train)
+
+# Ajustement du modèle Weibull
+weibull_model <- survreg(Surv(survival_months, reincarcerated) ~.,
+                         data = don_train, dist = "weibull")
+
+# Entraînement de la forêt aléatoire de survie en parallèle
+RSF_model <- foreach(i = 1:1, .packages = "randomForestSRC") %dopar% {
+  rfsrc(Surv(survival_months, reincarcerated) ~ ., data = don_train, 
+        ntree = 200, mtry = 2, modesize = 15 ,nsplit = 5, importance = "random")
+}
+
+RSF_model <- RSF_model[[1]]
+
+stopCluster(cl)
+```
+
+## **La comparaison des C-index des modèle**
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Calcul du C-index pour le modèle de COX
+C_index_COX <- round(concordance(cox_model)$concordance,3)
+
+# Calcul du C-index pour le modèle Weibull
+C_index_Weibull <- round(concordance(weibull_model)$concordance,3)
+
+# Calcul du C-index pour le modèle RSF
+C_index_RSF <- round(1 - get.cindex(RSF_model$yvar[,1], RSF_model$yvar[,2],
+                                    RSF_model$predicted.oob),3)
+
+knitr::kable(data.frame(C_index_COX,C_index_Weibull,C_index_RSF),
+      caption =  "C-Index du modèle de COX, de Weibull et de RSF")
+
+```
+
+Après avoir analysé la significativité et l'importance des variables, ainsi qu'estimé les hyperparamètres du modèle de forêt aléatoire de survie, nous avons entraîné trois modèles distincts : un modèle de Cox, un modèle de Weibull et un modèle de forêt aléatoire de survie.
+
+L’analyse du tableau des **C-index** des modèles montre que, parmi les trois, la **Forêt Aléatoire de Survie** présente la **plus faible qualité prédictive** (**C_index = 0.575**). En revanche, avec un (**C-index = 0.598**), les modèles de **Cox** et de **Weibull** affichent des performances similaires.
+
+
+## **La comparaison des AIC des modèle**
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::kable(AIC(cox_model, weibull_model),
+      caption =  "L'AIC du modèle de COX et de Weibull")
+```
+
+Étant donné que les modèles de **Cox** et de **Weibull** présentent des performances similaires en termes de **C-index**, nous avons comparé leurs **AIC**. Le modèle de **Weibull**, affichant l’**AIC** le plus faible, semble offrir une meilleure adéquation aux données. Nous avons donc choisi de le conserver.
+
+## **Le modèle final**
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Résumé du modèle Weibull
+summary(weibull_model)
+```
+
+Pour estimer ce modèle, nous avons sélectionné uniquement les variables que nous jugeons pertinentes, à savoir le sexe (sex), l’âge (age), le type d’infraction (offense_type) et le type de supervision (supervision_type).
+
+- **La qualité du modèle**
+
+La encore, le paramètre de l’échelle (**scale = 0.993**) est **proche de 1**, indiquant que **le taux de récidive reste relativement constant dans le temps**. Ce paramètre d'echelle montre également que la distribution des temps de survie ressemble fortement à une loi exponentielle. Le **test du Chi² (p << 0.05)** confirme que le modèle est globalement significatif.
+
+Les coefficients de ce modèle confirme ce que nous avions vu dans le modèle de Weibull plus haut. Nous pouvons distinguer les facteurs suivant. Nous pouvons distinguer les facteurs comme l'**âge** (plus l'âge augmente, moins les individus récidivent), les **infractions du type violentes**, infractions contre l’ordre public et les **infractions contre la propriété** qui ont un temps de récidive plus long par rapport au type d'infraction **Drug**. 
+
+Pour les facteurs qui réduisent le temps avant le récidive, nous pouvons distinguer les facteurs comme le **sexe male** (réduit le temps de récidiver par rapport au **sexe femele**), les infractions du type "Other" (réduit le temps de récidiver par rapport au type d'infraction **Drug**), et enfin, les détenus sous **Work Release** récidivent plus rapidement que ceux libérés après une peine complète. 
+
+# **Conclusion**
+
+
+La gestion de la récidive carcérale est un défi complexe, mais l’identification des facteurs influençant la réincarcération peut aider les décideurs à mieux orienter leurs politiques afin de réduire le taux de retour en prison.
+
+Le modèle de **Weibull**, que nous avons sélectionné, présente à la fois un intérêt explicatif et prédictif. D’un côté, son aspect explicatif permet aux décideurs d’identifier des tendances générales et d’adapter les politiques de réinsertion en fonction des profils types. D’un autre côté, son aspect prédictif offre la possibilité de personnaliser les interventions en fonction des caractéristiques individuelles des détenus.
+
+Nos analyses montrent que certains facteurs augmentent significativement le risque de récidive. En particulier, les individus de **sexe masculin**, ceux ayant commis une infraction classée dans la catégorie **Other**, ainsi que les détenus sous le régime de **Work Release**, ont une probabilité plus élevée de récidiver rapidement. À l’inverse, les femmes semblent avoir un risque plus faible de retour en détention.
+
+Toutefois, cette étude a rencontré certaines limites méthodologiques, notamment la présence de valeurs manquantes pour la durée de suivi des individus n’ayant pas récidivé, ce qui a pu impacter la robustesse des estimations.
+
+En termes de qualité des modèles, les **C-index** obtenus sont globalement autour de 0,60 (inférieurs à 0,70). Cela indique que les modèles prédissent mieux que le hasard, mais avec une précision encore perfectible. Des approches plus avancées, comme les modèles de survie avec variables latentes ou l’intégration d’algorithmes d’apprentissage profond, pourraient être explorées pour améliorer ces performances.
+
+
+# **Annexe**
+
+## Estimateur de Nelson-Aalen
+
+### Comparaison de groupes: estimateur de Nelson-Aalen par sexe
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Estimation du modèle Nelson-Aalen par sexe
+fit_survFH_sex <- survfit(Surv(survival_months, reincarcerated) ~ sex, 
+                            data = iowa_data, 
+                            type = "fleming-harrington")
+
+# Tracé de la fonction de risque cumulé par sexe
+plot(fit_survFH_sex, fun = "cumhaz", col = 1:2, lwd = 2,
+     main = "Estimateur de Nelson-Aalen de la fonction de risque cumulé par sexe",
+     xlab = "Temps (mois)",
+     ylab = "Risque cumulé de récidive")
+
+# Ajout d'une légende
+legend("bottomright", legend = levels(as.factor(iowa_data$sex)), 
+       col = 1:2, lwd = 2, bty = "n")
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Les hommes (courbe rouge) présentent un risque cumulé de récidive plus élevé que les femmes (courbe noire) sur toute la période.
+À 40 mois, le risque cumulé atteint environ 0.42 pour les hommes contre 0.28 pour les femmes, confirmant une plus forte propension des hommes à récidiver.
+L’écart entre les deux courbes se creuse avec le temps, suggérant que la différence de récidive entre sexes s'accentue progressivement après la libération.
+
+### Comparaison de groupes: estimateur de Nelson-Aalen par type d'infraction
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Estimation du modèle Nelson-Aalen par type de supervision
+fit_survFH_offense <- survfit(Surv(survival_months, reincarcerated) ~ offense_type, 
+                                  data = iowa_data, 
+                                  type = "fleming-harrington")
+
+# Tracé de la fonction de risque cumulé par type de supervision
+plot(fit_survFH_offense, fun = "cumhaz", col = 1:5, lwd = 2,
+     main = "Estimateur de N-A de la fonction de risque cumulé par type d'infraction",
+     xlab = "Temps (mois)",
+     ylab = "Risque cumulé de récidive")
+
+# Ajout d'une légende
+legend("topleft", legend = levels(as.factor(iowa_data$offense_type)), 
+       col = 1:5, lwd = 2, bty = "n")
+
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Les infractions "Other" (rouge) présentent le risque cumulé de récidive le plus élevé, dépassant 0.65 à 40 mois, indiquant une récidive plus rapide et plus fréquente.
+De manière générale, Les infractions "Other" et celles liées aux biens ou aux drogues sont les plus associées à la récidive, tandis que les infractions violentes récidivent le moins.
+
+### Comparaison de groupes: estimateur de Nelson-Aalen par type de supervision
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Estimation du modèle Nelson-Aalen par type de supervision
+fit_survFH_supervision <- survfit(Surv(survival_months, reincarcerated) ~ supervision_type, 
+                                  data = iowa_data, 
+                                  type = "fleming-harrington")
+
+# Tracé de la fonction de risque cumulé par type de supervision
+plot(fit_survFH_supervision, fun = "cumhaz", col = 1:3, lwd = 2,
+     main = "Estimateur de N-A de la fonction de risque par type de supervision",
+     xlab = "Temps (mois)",
+     ylab = "Risque cumulé de récidive")
+
+# Ajout d'une légende
+legend("bottomright", legend = levels(as.factor(iowa_data$supervision_type)), 
+       col = 1:3, lwd = 2, bty = "n")
+
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Les détenus en Work Release récidivent plus vite et plus souvent, suggérant un besoin d’un suivi post-libération renforcé.
+
+### Comparaison de groupes: estimateur de Nelson-Aalen par race
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Estimation du modèle Nelson-Aalen par race
+fit_survFH_race <- survfit(Surv(survival_months, reincarcerated) ~ race, 
+                            data = iowa_data, 
+                            type = "fleming-harrington")
+
+# Tracé de la fonction de risque cumulé par race
+plot(fit_survFH_race, fun = "cumhaz", col = 1:6, lwd = 2,
+     main = "Estimateur de Nelson-Aalen de la fonction de risque par race",
+     xlab = "Temps (mois)",
+     ylab = "Risque cumulé de récidive")
+
+# Ajout d'une légende
+legend("topleft", legend = levels(as.factor(iowa_data$race)), 
+       col = 1:6, lwd = 2, bty = "n")
+
+
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>
+
+Les Amérindiens/Alaska Natives (noir) présentent le risque cumulé de récidive le plus élevé, atteignant environ 0.6 à 40 mois, ce qui indique une récidive plus fréquente et rapide.
+Les Asiatiques/Insulaires du Pacifique (rouge) ont le risque cumulé de récidive le plus faible, ce qui suggère une meilleure réinsertion ou un suivi plus efficace.
+Les sauts marqués chez les Amérindiens/Alaska Natives et Les Asiatiques/Insulaires du Pacifique montrent une concentration d’événements de récidive à des moments spécifiques, ce qui peut être lié à des facteurs structurels (ex: fin de probation, manque de suivi social).
+
+## Test de wilcoxon par sexe
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Test de wilcoxon
+wilcoxon_sex <- survdiff(Surv(survival_months, reincarcerated) ~ sex, 
+                          data = iowa_data, rho = 1)
+wilcoxon_sex
+```
+
+## Test de wilcoxon par race
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+wilcoxon_race <- survdiff(Surv(survival_months, reincarcerated) ~ race, 
+                          data = iowa_data, rho = 1)
+wilcoxon_race
+```
+
+### Modèle exponentiel
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Ajustement du modèle exponentiel
+exp_model <- survreg(Surv(survival_months, reincarcerated) ~ sex + 
+                     race + age + offense_type + supervision_type, 
+                     data = iowa_data, dist = "exponential")
+
+# Résumé du modèle exponentiel
+summary(exp_model)
+
+```
+
+### Comparaison des AIC des models: exponetiels vs Weibull
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+AIC(weibull_model, exp_model)
+```
+
+<h4 style="text-align:left;">COMMENTAIRE:</h4>  
+
+L’Akaike Information Criterion (**AIC**) est une mesure qui permet de comparer la qualité de plusieurs modèles statistiques : **plus l’AIC est faible, meilleur est le modèle** en termes de compromis entre ajustement et complexité.  
+
+Le **modèle exponentiel** présente un **AIC légèrement plus faible que le modèle de Weibull**, ce qui **indique qu'il s'ajuste légèrement mieux aux données** tout en étant plus simple (il a 12 degrés de liberté contre 13 pour Weibull). Toutefois, la différence d’AIC entre les deux modèles est **minime (~2 points)**, ce qui signifie que les performances des deux modèles sont **très proches**.  
+
+**Conclusion** : Le **modèle exponentiel est légèrement préféré**, mais la faible différence d’AIC suggère que **le modèle de Weibull reste une alternative valide**, notamment si l'on suspecte que le taux de récidive varie avec le temps (ce que Weibull permet de modéliser). 
+

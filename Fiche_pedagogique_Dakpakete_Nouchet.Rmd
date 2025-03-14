@@ -1,0 +1,51 @@
+---
+title: "Fiche pédagogique (fiche descriptive) Forêt Aléatoire de Survie (RSF)"
+author: "Odilon Saint-Cyr Dakpakete & Kwami NOUCHET"
+date: "2025-03-13"
+output:
+  pdf_document:
+    number_sections: true
+    toc: true
+  html_document:
+    toc: true
+    df_print: paged
+    
+header-includes:
+- \usepackage{amsmath}
+- \usepackage{amsfonts}
+- \usepackage{amssymb}
+- \usepackage{graphicx}
+- \usepackage{float}
+- \usepackage{titling}
+- \pretitle{\begin{center}\LARGE\bfseries\vspace{5cm}}
+- \posttitle{\par\end{center}\vspace{1cm}}
+- \preauthor{\begin{center}\LARGE}
+- \postauthor{\par\end{center}\vspace{10cm}}
+- \newpage  
+---
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+# Installer pacman si non installé
+if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
+pacman::p_load(tibble, DT, tidyverse, tidymodels, skimr, censored, survival, plotly, survminer, parsnip, recipes, workflows, tune, rsample, yardstick, ranger, xgboost, kernlab, sassy, ggplot2, readr, ggsurvfit, htmltools, summarytools, pec, randomForestSRC, mapview,doParallel,ggRandomForests,foreach,caret,patchwork,calibrate) 
+# Vérification des packages chargés
+print("Tous les packages ont été installés et chargés avec succès ! ✅")  
+```
+
+# Introduction
+
+L'analyse de survie est une méthode statistique qui a pour objectif de modéliser la durée écoulée avant qu'un évènement donné ne se produise. Cette méthode a d'abord été développée dans le domaine médical pour modéliser le temps écouler avant la guérison d'une personne sous traitement par exemple. Cependant, elle est aujourd'hui utilisée dans plusieurs domaines tels que la finance, l'économie, la biologie, etc.
+
+La particularité des données de survie est qu'il nous faut au moins deux variables pour modéliser le temps écoulé avant l'évènement : la variable représentant le durée et une variable binaire qui indique si une donnée est censurée, c'est nous ne disposons pas d'information pour savoir si l'évènement a eut lieu chez l'individu ou non. Et eventuellement d'autres variables explicatives qui peuvent influencer la durée avant l'évènement.
+
+Plusieurs méthodes ont été développées pour modéliser les données de survie. Parmi ces méthodes, nous avons le modèle non paramétrique (Modèlé de Kaplan-Meier), les modèles sémi paramétriques et paramétriques (respectivement le modèle de Cox et de Weibull). 
+
+Avec l'avènement de l'apprentissage machine (machine learning), de nouvelles techniques ont été développées pour apprendre des données. Ces techniques d'apprentissage sont souvent réputé d'avoir une bonne qualité de prédiction. Parmi ces techniques, nous avons la forêt aléatoire qui aggregent plusieurs arbres de décision généralement du type CART (Classification And Regression Trees) afin d'améliorer la qualité de la prédiction. Ainsi, cette méthode a été étendue sur les données de survie, généralement censurées à droite. Soit les forêts aléatoires de survie (RSF).
+
+L'objectif de cette fiche pédagogique est de présenter les forêts aléatoires de survie (RSF) et en suite, nous montrerons un exemple d'application.
+
+
+
+
